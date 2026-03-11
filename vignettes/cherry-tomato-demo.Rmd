@@ -60,7 +60,7 @@ data(cherry_tomato_msi)
 
 demo_msi2 <- cherry_tomato_msi |>
 	normalize(method="tic") |>
-  peakPick(method="diff") |>
+    peakPick(method="diff") |>
 	peakProcess(SNR=2, 
 	            # sampleSize=0.1,
 	            tolerance=0.5, 
@@ -288,7 +288,7 @@ Using cherry_tomato_msi, we demonstrated how to:
 This toy dataset provides a compact and reproducible way to explore the core functions of spatMetaCluster.
 
 
-## Acknowledgement
+# Acknowledgement
 
 This package is designed to work with `Cardinal` MSI objects, and some
 demonstration steps in this vignette follow a workflow style similar to the

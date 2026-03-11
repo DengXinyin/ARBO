@@ -1,0 +1,303 @@
+---
+title: "Spatial metabolomics workflow using the cherry_tomato_msi example dataset"
+author: "Xinyin Deng"
+date: "`r Sys.Date()`"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Spatial metabolomics workflow using the cherry_tomato_msi example dataset}
+  %\VignetteEngine{knitr::rmarkdown}
+  \usepackage[UTF-8]{inputenc}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  message = FALSE,
+  warning = FALSE,
+  collapse = TRUE,
+  comment = "#>",
+  fig.align = "center"
+)
+
+knitr::include_graphics(system.file("extdata", "Cherry_tomato.png", package = "spatMetaCluster"))
+
+```
+
+
+# Overview
+
+This tutorial demonstrates a minimal spatial metabolomics workflow using the
+cherry_tomato_msi example dataset included in spatMetaCluster.
+
+cherry_tomato_msi is a toy MSImagingExperiment object designed for package
+examples and tutorials. It is not a real MSI acquisition dataset. The
+spatial structure and RGB information were generated from a real cherry tomato
+image, while the m/z features were manually defined for demonstration purposes.
+Therefore, the m/z values in this dataset do not carry biological or chemical
+interpretation.
+
+Despite its simplified nature, the dataset is useful for illustrating:
+
+MSI object inspection
+spectral visualization
+ion image visualization
+dimension reduction
+spatial clustering
+clustering with spatMetaCluster
+
+For reference tutorials on the Cardinal package, please see[Cardinal vignettes](https://github.com/kuwisdelu/CardinalWorkflows/tree/devel/vignettes)
+
+
+![cherry tomato](~/spatMetaCluster/inst/extdata/Cherry_tomato.png)
+
+
+# Load packages and example data
+```{r Load-MSI-data,echo=TRUE}
+library(Cardinal)
+library(ggplot2)
+library(spatMetaCluster)
+
+data(cherry_tomato_msi)
+
+demo_msi2 <- cherry_tomato_msi |>
+	normalize(method="tic") |>
+  peakPick(method="diff") |>
+	peakProcess(SNR=2, 
+	            # sampleSize=0.1,
+	            tolerance=0.5, 
+	            units="mz")
+demo_msi2
+
+```
+
+The example dataset contains 20 m/z features and 43,253 spectra. It is
+intentionally lightweight so that examples remain fast and reproducible.
+
+# Inspect the dataset structure
+
+We first inspect the overall structure of the MSI object.
+```{r MSI-data,echo=TRUE}
+demo_msi2
+```
+
+This object is a centroided MSImagingExperiment with:
+
+20 features
+43,253 spectra
+spatial coordinates (x, y)
+RGB pixel metadata
+one intensity assay
+The m/z range spans from 141.1193 to 457.5927.
+
+# Visualize a representative spectrum
+
+A useful first step is to examine the spectrum from one pixel. Below we plot
+the spectrum for pixel index 1020 and annotate several peaks.
+
+```{r MSI-mean,echo=TRUE,fig.height=6,fig.width=12}
+demo_msi2 <- summarizeFeatures(demo_msi2, c(Mean="mean"))
+
+Cardinal::plot(
+  demo_msi2,
+  #i = 1020,
+  isPeaks = TRUE,
+  annPeaks = 6,
+  xlim=c(140,160),
+  "Mean", xlab="m/z", ylab="Intensity"
+)
+```
+
+Because this is a toy dataset with manually defined m/z values, the peak pattern
+should be interpreted only as a visualization example.
+
+# Visualize ion images
+
+We can display ion images for all available m/z features.
+
+```{r MSI-TIC,echo=TRUE,fig.height=6,fig.width=8}
+demo_msi2 <- summarizePixels(demo_msi2, c(TIC="sum"))
+
+Cardinal::image(demo_msi2, "TIC")
+
+image(
+  demo_msi2,
+  mz = featureData(demo_msi2)$mz,
+  smooth = "gaussian",
+  enhance = "hist",
+  scale = TRUE,
+  key = T
+)
+```
+
+This panel provides a quick view of spatial intensity variation across the
+cherry tomato tissue. Since the spatial pattern was generated from an image-based
+template, the resulting ion maps are suitable for demonstrating image-style MSI
+visualization workflows.
+
+# Dimension reduction with PCA
+
+Principal component analysis (PCA) provides a low-dimensional summary of the
+spectral variation across pixels.
+
+```{r PCA,echo=TRUE}
+demo_msi2_pca <- Cardinal::PCA(demo_msi2, ncomp = 4)
+demo_msi2_pca
+```
+
+We can visualize the PCA components as spatial images.
+
+```{r PCA-plot,echo=TRUE,fig.height=4,fig.width=6}
+image(
+  demo_msi2_pca,
+  smooth = "adaptive",
+  enhance = "histogram"
+)
+```
+
+PCA is useful for identifying dominant global patterns in the dataset, although
+in this toy example the components mainly reflect the manually constructed
+structure in the data.
+
+# Dimension reduction with NMF
+
+Non-negative matrix factorization (NMF) is another commonly used decomposition
+method for MSI data.
+
+```{r NMF,echo=TRUE}
+demo_msi2_nmf <- Cardinal::NMF(demo_msi2, ncomp = 4, niter = 30)
+demo_msi2_nmf
+```
+
+We again visualize the resulting components.
+
+```{r NMF-plot,echo=TRUE,fig.height=4,fig.width=6}
+image(
+  demo_msi2_nmf,
+  smooth = "adaptive",
+  enhance = "histogram"
+)
+```
+
+NMF often produces parts-based spatial patterns, which can be easier to interpret
+in imaging data.
+
+# Spatial clustering with spatial shrunken centroids
+
+Cardinal provides the spatialShrunkenCentroids() method for spatially aware
+clustering of MSI data.
+
+```{r spatialShrunkenCentroids,echo=TRUE}
+set.seed(2026)
+demo_msi2_ssc <- Cardinal::spatialShrunkenCentroids(
+  demo_msi2,
+  weights = "adaptive",
+  r = 2,
+  k = 4,
+  s = 2
+)
+
+demo_msi2_ssc
+```
+
+We can display the resulting segmentation map.
+
+```{r spatialShrunkenCentroids-plot,echo=TRUE,fig.height=4,fig.width=6}
+image(demo_msi2_ssc, i = 1)
+```
+
+This gives a spatially smoothed cluster assignment across the tissue region.
+
+# Clustering with spatMetaCluster
+
+Next, we demonstrate the clustering workflow implemented in spatMetaCluster.
+
+Because this step depends on an external Python environment, the code is shown
+but not evaluated automatically in the vignette.
+
+The Python backend was tested with a conda environment containing Python 3.9, `numpy` 1.24.4, and `umap-learn` 0.5.7. Other compatible versions may also work when properly configured through `reticulate`.
+
+
+```{r spatMetaCluster,echo=TRUE}
+res <- spatMetaCluster::spatial_kmeans_workflow(
+  msi_obj = demo_msi2,
+  python_path = "/home/hsinyinteng/miniconda3/envs/dxy_python9/bin/python",
+  centers = 4,
+  metric = "cosine",
+  n_neighbors = 25L,
+  min_dist = 0.3,
+  n_components = 2L
+)
+
+head(res$cluster_df)
+```
+
+In this example, the workflow uses:
+
+centers = 4 clusters
+cosine distance
+UMAP neighborhood size of 25
+min_dist = 0.3
+a 2-dimensional embedding
+
+# Plot the clustering result
+
+The output cluster assignments can be visualized using ggplot2.
+
+```{r spatMetaCluster-plot,echo=TRUE,fig.height=4,fig.width=6}
+cluster_df <- res$cluster_df
+
+ggplot(cluster_df, aes(x, y, color = factor(kmeans_cluster))) +
+  geom_point(size = 0.1) +
+  scale_y_reverse() +
+  coord_fixed() +
+  theme_void() +
+  labs(color = "Cluster") +
+  guides(
+    color = guide_legend(
+      override.aes = list(size = 4)
+    )
+  )
+```
+
+This plot provides a simple spatial view of the cluster labels produced by the
+workflow.
+
+# Notes on interpretation
+
+The cherry_tomato_msi dataset is intentionally lightweight and simplified. It
+is designed to make package examples fast, stable, and easy to understand.
+
+A few caveats should be kept in mind:
+
+The dataset contains only 20 m/z features.
+The m/z values are manually defined and have no real biochemical meaning.
+The spatial patterns are image-derived rather than experimentally measured.
+Results are appropriate for workflow demonstration, but not for biological
+inference or method benchmarking.
+
+
+# Summary
+
+Using cherry_tomato_msi, we demonstrated how to:
+
+1.load an example MSImagingExperiment
+2.inspect spectra and ion images
+3.perform PCA and NMF
+4.run spatial shrunken centroids clustering
+5.apply the spatMetaCluster clustering workflow
+
+This toy dataset provides a compact and reproducible way to explore the core functions of spatMetaCluster.
+
+
+## Acknowledgement
+
+This package is designed to work with `Cardinal` MSI objects, and some
+demonstration steps in this vignette follow a workflow style similar to the
+Cardinal tutorials. The included `cherry_tomato_msi` dataset is a manually
+constructed toy example created for demonstration purposes and is not derived
+from the example datasets distributed with Cardinal.
+
+
+# SessionInfo
+```{r SessionInfo,echo=TRUE}
+sessionInfo()
+```

@@ -1,0 +1,174 @@
+rm(list = ls())
+
+# 强制重新加载
+library(devtools)
+detach("package:spatMetaCluster", unload = TRUE, character.only = TRUE)
+devtools::load_all("/home/hsinyinteng/spatMetaCluster", reset = TRUE)
+
+library(Cardinal)
+Eye <- readImzML("/home/hsinyinteng/Spatial_Metabolomics/fish_eye/01_root_mean_square.imzML")
+Eye <- Eye |> peakPick(SNR = 2) |> peakAlign()
+Eye
+image(Eye)
+
+# 1. 提取矩阵
+dat <- extract_spectra_matrix(Eye)
+print(dim(dat$spectra))
+print(head(dat$pixel_info))
+
+# 2. 数据检查
+check_spectra_matrix(dat$spectra)
+
+# 3. 去常数列
+spectra_filtered <- remove_constant_features(dat$spectra)
+print(dim(spectra_filtered))
+
+# 4. Min-max归一化
+spectra_scaled <- minmax_normalize(spectra_filtered)
+print(range(spectra_scaled, na.rm = TRUE))
+
+# 5. 检查Python环境
+check_umap_python_env("/home/hsinyinteng/miniconda3/envs/dxy_python9/bin/python")
+
+# 6. UMAP
+umap_df <- run_umap_py(
+  x = spectra_scaled,
+  python_path = "/home/hsinyinteng/miniconda3/envs/dxy_python9/bin/python",
+  metric = "cosine",
+  n_neighbors = 10L,
+  min_dist = 0.05,
+  n_components = 2L,
+  random_state = 2025L
+)
+
+print(head(umap_df))
+print(dim(umap_df))
+
+# 7. kmeans
+km_res <- run_kmeans_cluster(
+  embedding = umap_df,
+  centers = 10,
+  seed = 2024
+)
+
+print(table(km_res$cluster))
+
+# 8. 合并结果
+cluster_df <- build_cluster_dataframe(
+  embedding = umap_df,
+  cluster = km_res$cluster,
+  pixel_info = dat$pixel_info
+)
+
+print(head(cluster_df))
+
+
+library(ggplot2)
+ggplot(cluster_df, aes(x = UMAP1, y = UMAP2, color = kmeans_cluster)) +
+  geom_point(size = 0.1, alpha = 0.7) +  # 使用点形状
+  labs(# title = "UMAP Clustering of All Pixels",
+    x = "UMAP1",
+    y = "UMAP2") +
+  scale_color_manual(
+    values = c("1"  = "#8B0000","2"  = "#2E8B57","3"  = "#FF0000",
+               "4"  = "#FFC0CB","5"  = "#FF00FF","6"  = "#00FFFF",
+               "7"  = "#A9A9A9","8"  = "#FF7F0E","9"  = "#9370DB",
+               "10" = "#FFD700","11" = "#00FF00","12" = "#000000",
+               "13" = "#0000FF"),
+    guide = guide_legend(override.aes = list(size = 8),# 调整图例点大小
+                         ncol=1) # 图例的列数
+  ) +
+  theme_minimal(base_family = "Arial") +
+  theme(panel.border = element_rect(color = "black", fill = NA, linewidth = 1),  # 添加黑色边框
+        panel.grid.major = element_blank(),  # 去除主要网格线
+        panel.grid.minor = element_blank(),   # 去除次要网格线
+        plot.title = element_text(hjust = 0.5, size = 16, face = "plain", family = "Arial"),
+        legend.text = element_text(size = 18, face = "plain", family = "Arial"),
+        legend.title = element_text(size = 20, face = "plain", family = "Arial"),
+        axis.title.x = element_text(size = 18, face = "plain", family = "Arial"),
+        axis.title.y = element_text(size = 18, face = "plain", family = "Arial"),
+        axis.text = element_text(size = 16, face = "plain", family = "Arial")
+  ) +
+  coord_cartesian()  # 设置坐标轴范围
+
+
+
+ggplot(cluster_df, aes(x = x, y = y, color = factor(kmeans_cluster))) +
+  geom_point(size = 1, alpha = 0.9) +
+  scale_y_reverse() +
+  scale_color_manual(
+    values = c(
+      "1" = "#8B0000", "2" = "#2E8B57", "3" = "#FF0000",
+      "4" = "#FFC0CB", "5" = "#FF00FF", "6" = "#00FFFF",
+      "7" = "#A9A9A9", "8" = "#FF7F0E", "9" = "#9370DB",
+      "10" = "#FFD700", "11" = "#00FF00", "12" = "#000000",
+      "13" = "#0000FF"
+    ),
+    name = "Kmeans Cluster",
+    guide = guide_legend(
+      title.position = "left",       # 标题位置
+      title.hjust = 0.5,             # 标题居中
+      byrow = TRUE,                  # 按行填充
+      override.aes = list(size = 8), # 增大图例点大小
+      ncol=4                         # 图例的列数
+    )
+  ) +
+  coord_fixed(ratio = 1) +
+  theme_minimal(base_family = "Arial") +
+  theme(
+    axis.text = element_blank(),
+    axis.ticks = element_blank(),
+    axis.title = element_blank(),
+    panel.grid = element_blank(),
+    legend.position = "bottom",    # 图例放在底部
+    legend.box = "horizontal",     # 水平排列
+    legend.justification = "center",
+    legend.spacing.x = unit(0.5, 'cm'), # 图例子项水平间距
+    legend.text = element_text(size = 18),
+    legend.title = element_text(size = 20),
+    plot.margin = margin(10, 10, 20, 10) # 调整底部边距避免图例被裁剪
+  )
+
+
+Eye2 <- attach_cluster_to_pixeldata(Eye, cluster_df)
+
+head(as.data.frame(Cardinal::pixelData(Eye2)))
+colnames(Cardinal::pixelData(Eye2))
+head(as.data.frame(Cardinal::pixelData(Eye2))$pixel_ID)
+
+
+# 10. 一键工作流
+devtools::load_all("/home/hsinyinteng/spatMetaCluster", reset = TRUE)
+
+library(Cardinal)
+Eye <- readImzML("/home/hsinyinteng/Spatial_Metabolomics/fish_eye/01_root_mean_square.imzML")
+Eye <- Eye |> peakPick(SNR = 2) |> peakAlign()
+
+res <- spatial_kmeans_workflow(
+  msi_obj = Eye,
+  python_path = "/home/hsinyinteng/miniconda3/envs/dxy_python9/bin/python",
+  centers = 10
+)
+
+head(res$cluster_df)
+head(as.data.frame(Cardinal::pixelData(res$msi_obj))$pixel_ID)
+head(as.data.frame(Cardinal::pixelData(res$msi_obj)))
+
+cluster_df <- res$cluster_df
+umap_df <- res$umap_df
+Eye2 <- res$msi_obj
+
+
+ggplot(cluster_df, aes(UMAP1, UMAP2, color = factor(kmeans_cluster))) +
+  geom_point(size = 0.2) +
+  theme_minimal()
+
+ggplot(cluster_df, aes(x, y, color = factor(kmeans_cluster))) +
+  geom_point(size = 1) +
+  scale_y_reverse() +
+  coord_fixed() +
+  theme_void()
+
+image(Eye2)
+
+

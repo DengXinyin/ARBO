@@ -11,8 +11,18 @@
 #' @param x A numeric matrix with samples/pixels as rows and features as columns.
 #' @param python_path Optional character string specifying the Python executable.
 #' If \code{NULL}, the current \pkg{reticulate} Python configuration will be used.
-#' @param metric Distance metric used by UMAP. Must be one of
-#' \code{"cosine"} or \code{"euclidean"}. Default is \code{"cosine"}.
+#' @param metric Distance metric used by UMAP. Supported values are
+#' \code{"cosine"}, \code{"correlation"}, \code{"euclidean"},
+#' \code{"chebyshev"}, \code{"manhattan"}, \code{"minkowski"},
+#' \code{"canberra"}, \code{"braycurtis"}, \code{"hamming"}, and
+#' \code{"jaccard"}. Default is \code{"cosine"}.
+#'
+#' Recommended metrics for clustering and exploratory analysis are
+#' \code{"cosine"}, \code{"correlation"}, \code{"euclidean"},
+#' \code{"chebyshev"}, \code{"manhattan"}, and \code{"minkowski"}.
+#' In our empirical testing, \code{"canberra"}, \code{"braycurtis"},
+#' \code{"hamming"}, and \code{"jaccard"} generally produced less satisfactory
+#' clustering results and are therefore not recommended as default choices.
 #' @param n_neighbors Integer; number of neighbors used by UMAP. Default is \code{10L}.
 #' @param min_dist Numeric; UMAP \code{min_dist} parameter. Default is \code{0.05}.
 #' @param n_components Integer; number of embedding dimensions. Default is \code{2L}.
@@ -38,6 +48,12 @@
 #' may override \code{n_jobs} to \code{1}. To enable actual parallel execution,
 #' use \code{random_state = NULL}.
 #'
+#' For MSI and other high-dimensional omics data, \code{"cosine"},
+#' \code{"correlation"}, and \code{"euclidean"} are often good starting points.
+#' Other metrics may behave differently depending on sparsity, scaling, and data
+#' distribution, so metric selection should be guided by downstream clustering
+#' performance and biological interpretability.
+#'
 #' @examples
 #' \dontrun{
 #' mat <- matrix(runif(100), nrow = 10)
@@ -45,6 +61,7 @@
 #' emb_single <- run_umap_py(
 #'   mat,
 #'   python_path = "/path/to/python",
+#'   metric = "cosine",
 #'   n_components = 2,
 #'   random_state = 2025L,
 #'   n_jobs = 1L
@@ -54,7 +71,7 @@
 #' emb_parallel <- run_umap_py(
 #'   mat,
 #'   python_path = "/path/to/python",
-#'   metric = "euclidean",
+#'   metric = "correlation",
 #'   n_components = 2,
 #'   random_state = NULL,
 #'   n_jobs = 4L
@@ -74,13 +91,20 @@ run_umap_py <- function(
     n_jobs = 1L,
     verbose = TRUE
 ) {
+  x <- as.matrix(x)
+  storage.mode(x) <- "numeric"
+
   check_spectra_matrix(x)
 
   if (!requireNamespace("reticulate", quietly = TRUE)) {
     stop("Package 'reticulate' is required but not installed.")
   }
 
-  metric <- match.arg(metric, choices = c("cosine", "euclidean"))
+  allowed_metrics <- c(
+    "cosine", "correlation", "euclidean", "chebyshev", "manhattan",
+    "minkowski", "canberra", "braycurtis", "hamming", "jaccard"
+  )
+  metric <- match.arg(metric, choices = allowed_metrics)
 
   if (!is.numeric(n_neighbors) || length(n_neighbors) != 1L || is.na(n_neighbors)) {
     stop("'n_neighbors' must be a single positive integer.")

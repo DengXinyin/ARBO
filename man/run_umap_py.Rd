@@ -22,8 +22,18 @@ run_umap_py(
 \item{python_path}{Optional character string specifying the Python executable.
 If \code{NULL}, the current \pkg{reticulate} Python configuration will be used.}
 
-\item{metric}{Distance metric used by UMAP. Must be one of
-\code{"cosine"} or \code{"euclidean"}. Default is \code{"cosine"}.}
+\item{metric}{Distance metric used by UMAP. Supported values are
+\code{"cosine"}, \code{"correlation"}, \code{"euclidean"},
+\code{"chebyshev"}, \code{"manhattan"}, \code{"minkowski"},
+\code{"canberra"}, \code{"braycurtis"}, \code{"hamming"}, and
+\code{"jaccard"}. Default is \code{"cosine"}.
+
+Recommended metrics for clustering and exploratory analysis are
+\code{"cosine"}, \code{"correlation"}, \code{"euclidean"},
+\code{"chebyshev"}, \code{"manhattan"}, and \code{"minkowski"}.
+In our empirical testing, \code{"canberra"}, \code{"braycurtis"},
+\code{"hamming"}, and \code{"jaccard"} generally produced less satisfactory
+clustering results and are therefore not recommended as default choices.}
 
 \item{n_neighbors}{Integer; number of neighbors used by UMAP. Default is \code{10L}.}
 
@@ -64,6 +74,12 @@ In Python \pkg{umap-learn}, fixed random seeds and parallel execution may be
 incompatible. In particular, when \code{random_state} is fixed, the backend
 may override \code{n_jobs} to \code{1}. To enable actual parallel execution,
 use \code{random_state = NULL}.
+
+For MSI and other high-dimensional omics data, \code{"cosine"},
+\code{"correlation"}, and \code{"euclidean"} are often good starting points.
+Other metrics may behave differently depending on sparsity, scaling, and data
+distribution, so metric selection should be guided by downstream clustering
+performance and biological interpretability.
 }
 \examples{
 \dontrun{
@@ -72,6 +88,7 @@ mat <- matrix(runif(100), nrow = 10)
 emb_single <- run_umap_py(
   mat,
   python_path = "/path/to/python",
+  metric = "cosine",
   n_components = 2,
   random_state = 2025L,
   n_jobs = 1L
@@ -81,7 +98,7 @@ head(emb_single)
 emb_parallel <- run_umap_py(
   mat,
   python_path = "/path/to/python",
-  metric = "euclidean",
+  metric = "correlation",
   n_components = 2,
   random_state = NULL,
   n_jobs = 4L

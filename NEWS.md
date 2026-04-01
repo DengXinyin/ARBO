@@ -1,4 +1,20 @@
+# ARBO 0.5.0
+
+## New features
+- Added two UMAP input strategies in `spatial_clustering_workflow()`:
+  - `"scaled"` for min-max scaled spectra
+  - `"l2_pca"` for row-wise L2-normalized spectra followed by PCA with `irlba`
+- Added `pca_n_components` to control the number of retained principal components
+  in the `"l2_pca"` workflow.
+- Enforced `metric = "euclidean"` when `umap_input_method = "l2_pca"`.
+
+## Package changes
+- Added `irlba` as a package dependency for PCA-based preprocessing.
+- Updated workflow documentation and examples to reflect the new UMAP input options.
+
+
 # ARBO 0.4.1
+
 ## New features
 - Added parallel execution support for Python UMAP via `n_jobs`.
 - `run_umap_py()` now allows `random_state = NULL` for non-deterministic parallel UMAP.

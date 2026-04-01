@@ -1,3 +1,68 @@
+# Internal helper: L2-normalize rows of a matrix
+.l2_normalize_rows <- function(x) {
+  x <- as.matrix(x)
+  storage.mode(x) <- "numeric"
+  check_spectra_matrix(x)
+
+  row_norms <- sqrt(rowSums(x^2, na.rm = TRUE))
+  row_norms[!is.finite(row_norms) | row_norms == 0] <- 1
+
+  x_norm <- x / row_norms
+  rownames(x_norm) <- rownames(x)
+  colnames(x_norm) <- colnames(x)
+
+  x_norm
+}
+
+# Internal helper: run PCA using irlba::prcomp_irlba
+.run_pca_irlba <- function(x, n_components = 30L, center = TRUE, scale. = FALSE) {
+  x <- as.matrix(x)
+  storage.mode(x) <- "numeric"
+  check_spectra_matrix(x)
+
+  if (!requireNamespace("irlba", quietly = TRUE)) {
+    stop("Package 'irlba' is required but not installed.")
+  }
+
+  if (!is.numeric(n_components) || length(n_components) != 1L || is.na(n_components)) {
+    stop("'pca_n_components' must be a single positive integer.")
+  }
+  n_components <- as.integer(n_components)
+
+  if (n_components < 1L) {
+    stop("'pca_n_components' must be >= 1.")
+  }
+
+  max_rank <- min(nrow(x) - 1L, ncol(x) - 1L)
+  if (max_rank < 1L) {
+    stop("Input matrix is too small for PCA after preprocessing.")
+  }
+
+  if (n_components > max_rank) {
+    stop(
+      "'pca_n_components' must be <= min(nrow(x) - 1, ncol(x) - 1). ",
+      "Current maximum allowed value is ", max_rank, "."
+    )
+  }
+
+  pca <- irlba::prcomp_irlba(
+    x = x,
+    n = n_components,
+    center = center,
+    scale. = scale.
+  )
+
+  scores <- as.data.frame(pca$x)
+  colnames(scores) <- paste0("PC", seq_len(ncol(scores)))
+  rownames(scores) <- rownames(x)
+
+  list(
+    model = pca,
+    scores = scores
+  )
+}
+
+
 #' Run a complete spatial metabolomics clustering workflow
 #'
 #' This high-level function performs a complete workflow for spatial
@@ -5,7 +70,12 @@
 #' \enumerate{
 #'   \item Extract the spectra matrix and pixel metadata from a Cardinal MSI object
 #'   \item Remove constant features
-#'   \item Apply feature scaling using min-max normalization
+#'   \item Prepare the UMAP input using one of two strategies:
+#'   \enumerate{
+#'     \item \code{"scaled"}: apply feature scaling using min-max normalization
+#'     \item \code{"l2_pca"}: apply row-wise L2 normalization, then PCA using
+#'     \code{irlba::prcomp_irlba()}
+#'   }
 #'   \item Run Python UMAP through \pkg{reticulate}
 #'   \item Perform clustering on the UMAP embedding
 #'   \item Build a clustering result table
@@ -15,6 +85,18 @@
 #' This workflow is designed for spatial metabolomics data stored in a
 #' Cardinal-compatible MSI object. UMAP is computed using the Python
 #' \pkg{umap-learn} backend via \pkg{reticulate}.
+#'
+#' Two UMAP input strategies are supported:
+#' \itemize{
+#'   \item \code{"scaled"}: the default general-purpose workflow. After removing
+#'   constant features, the spectra matrix is min-max scaled and passed directly
+#'   to UMAP.
+#'   \item \code{"l2_pca"}: a workflow intended for L2-normalized PCA embedding
+#'   followed by UMAP with Euclidean distance. In this mode, the spectra matrix
+#'   is row-wise L2-normalized, reduced by PCA using
+#'   \code{irlba::prcomp_irlba()}, and the resulting PCA scores are used as input
+#'   to UMAP. For this strategy, \code{metric} must be \code{"euclidean"}.
+#' }
 #'
 #' @param msi_obj A Cardinal MSI object.
 #' @param python_path Optional character string specifying the Python executable.
@@ -38,24 +120,35 @@
 #' Default is \code{2026L}.
 #' @param nstart Integer; number of random starts used by
 #' \code{stats::kmeans()}. Default is \code{10L}.
-#' @param metric Character; UMAP distance metric. Must be one of
-#' \code{"cosine"} or \code{"euclidean"}. Default is \code{"cosine"}.
+#' @param umap_input_method Character string specifying how the input to UMAP
+#' is constructed. Supported options are \code{"scaled"} and \code{"l2_pca"}.
+#' Default is \code{"scaled"}.
+#'
+#' \code{"scaled"} is the default general-purpose workflow: after constant
+#' feature removal, min-max scaled spectra are used directly as input to UMAP.
+#'
+#' \code{"l2_pca"} is intended for L2-normalized PCA embedding followed by
+#' Euclidean UMAP: after constant feature removal, spectra are row-wise
+#' L2-normalized, reduced by PCA using \code{irlba::prcomp_irlba()}, and the
+#' resulting PCA scores are used as input to UMAP. When
+#' \code{umap_input_method = "l2_pca"}, \code{metric} must be
+#' \code{"euclidean"}.
+#' @param pca_n_components Integer; number of principal components retained
+#' when \code{umap_input_method = "l2_pca"}. Default is \code{30L}. Ignored
+#' when \code{umap_input_method = "scaled"}.
+#' @param metric Character; UMAP distance metric. Supported values are
+#' \code{"cosine"}, \code{"correlation"}, \code{"euclidean"},
+#' \code{"chebyshev"}, \code{"manhattan"}, \code{"minkowski"},
+#' \code{"canberra"}, \code{"braycurtis"}, \code{"hamming"}, and
+#' \code{"jaccard"}. Default is \code{"cosine"}.
 #' @param n_neighbors Integer; number of neighbors for UMAP. Default is \code{10L}.
 #' @param min_dist Numeric; UMAP \code{min_dist} parameter. Default is \code{0.05}.
-#' @param n_components Integer; number of UMAP dimensions. Any positive integer
-#' is allowed, but \code{2} or \code{3} is recommended for most visualization
-#' and exploratory analysis tasks. Default is \code{2L}.
+#' @param n_components Integer; number of UMAP dimensions. Default is \code{2L}.
 #' @param umap_seed Optional integer; random seed for UMAP. Default is
 #' \code{2025L}. Use \code{NULL} to allow non-deterministic execution.
-#' In Python \pkg{umap-learn}, a fixed seed may disable or limit parallel
-#' execution. If \code{n_jobs != 1L} and \code{umap_seed} is not \code{NULL},
-#' the downstream UMAP call may switch the Python-side seed to \code{NULL}
-#' to allow parallel execution.
 #' @param n_jobs Integer; number of parallel jobs used by the Python UMAP
 #' backend. Default is \code{1L}. Use \code{-1L} to request all available CPU
-#' cores if supported by the Python backend. This argument affects only the
-#' Python UMAP step and does not automatically parallelize downstream clustering
-#' performed in R.
+#' cores if supported by the Python backend.
 #' @param verbose Logical; whether to print UMAP progress information.
 #' Default is \code{TRUE}.
 #'
@@ -63,91 +156,38 @@
 #' \describe{
 #'   \item{spectra_filtered}{A numeric matrix after removing constant features.}
 #'   \item{spectra_scaled}{A numeric matrix after feature scaling using
-#'   min-max normalization.}
+#'   min-max normalization when \code{umap_input_method = "scaled"}; otherwise
+#'   \code{NULL}.}
+#'   \item{spectra_l2}{A numeric matrix after row-wise L2 normalization when
+#'   \code{umap_input_method = "l2_pca"}; otherwise \code{NULL}.}
+#'   \item{pca_result}{A list containing the PCA model and PCA scores when
+#'   \code{umap_input_method = "l2_pca"}; otherwise \code{NULL}.}
+#'   \item{umap_input}{The object used as direct input to UMAP.}
 #'   \item{umap_df}{A data.frame containing UMAP coordinates.}
-#'   \item{clustering_result}{A list returned by \code{run_clustering()},
-#'   containing the fitted clustering result and cluster assignments.}
+#'   \item{clustering_result}{A list returned by \code{run_clustering()}.}
 #'   \item{cluster_df}{A data.frame containing UMAP coordinates, cluster labels,
 #'   and pixel metadata.}
 #'   \item{msi_obj}{The updated Cardinal MSI object with cluster labels added
 #'   to \code{pixelData}.}
 #' }
 #'
-#' @details
-#' The clustering step is performed on the UMAP embedding generated from the
-#' scaled spectra matrix.
-#'
-#' Method-specific clustering arguments are interpreted as follows:
-#' \itemize{
-#'   \item \code{"kmeans"} uses \code{centers}, \code{clustering_seed}, and \code{nstart}.
-#'   \item \code{"gmm"} uses \code{centers}.
-#'   \item \code{"fcm"} uses \code{centers} and \code{clustering_seed}.
-#'   \item \code{"dbscan"} uses \code{eps} and \code{minPts}.
-#'   \item \code{"hclust"} uses \code{centers} and \code{hclust_method}.
-#' }
-#'
-#' The \code{n_jobs} argument only controls parallel execution in the Python
-#' \pkg{umap-learn} backend. It does not parallelize feature extraction,
-#' feature scaling, or clustering methods executed in R.
-#'
-#' For Python \pkg{umap-learn}, fixed random seeds and parallel execution may
-#' conflict. In practice, when \code{umap_seed} is fixed, the backend may
-#' override \code{n_jobs} to \code{1}. To enable actual parallel execution,
-#' set \code{umap_seed = NULL}.
-#'
-#' For \code{clustering_method = "dbscan"}, cluster label \code{0} indicates
-#' noise points.
-#'
 #' @examples
 #' \dontrun{
-#' library(Cardinal)
-#'
-#' msi_obj <- readImzML("example.imzML")
-#'
-#' ## Reproducible single-thread workflow
-#' res1 <- spatial_clustering_workflow(
-#'   msi_obj = msi_obj,
+#' res <- spatial_clustering_workflow(
+#'   msi_obj = tomato,
 #'   python_path = "/path/to/python",
 #'   clustering_method = "kmeans",
-#'   centers = 10L,
+#'   centers = 2L,
+#'   umap_input_method = "scaled",
 #'   metric = "cosine",
-#'   n_neighbors = 10L,
-#'   min_dist = 0.05,
+#'   n_neighbors = 15L,
+#'   min_dist = 0.1,
 #'   n_components = 2L,
-#'   umap_seed = 2025L,
-#'   n_jobs = 1L
-#' )
-#'
-#' head(res1$umap_df)
-#' table(res1$cluster_df$cluster)
-#'
-#' ## Parallel UMAP workflow
-#' ## To allow actual parallelism in Python umap-learn, use umap_seed = NULL
-#' res2 <- spatial_clustering_workflow(
-#'   msi_obj = msi_obj,
-#'   python_path = "/path/to/python",
-#'   clustering_method = "kmeans",
-#'   centers = 10L,
-#'   metric = "cosine",
-#'   n_neighbors = 10L,
-#'   min_dist = 0.05,
-#'   n_components = 2L,
+#'   n_jobs = 1L,
 #'   umap_seed = NULL,
-#'   n_jobs = 4L
-#' )
-#'
-#' ## DBSCAN example
-#' res3 <- spatial_clustering_workflow(
-#'   msi_obj = msi_obj,
-#'   python_path = "/path/to/python",
-#'   clustering_method = "dbscan",
-#'   eps = 0.3,
-#'   minPts = 10L,
-#'   umap_seed = 2025L,
-#'   n_jobs = 1L
+#'   verbose = TRUE
 #' )
 #' }
-#'
 #' @export
 spatial_clustering_workflow <- function(
     msi_obj,
@@ -159,6 +199,8 @@ spatial_clustering_workflow <- function(
     hclust_method = "ward.D2",
     clustering_seed = 2026L,
     nstart = 10L,
+    umap_input_method = c("scaled", "l2_pca"),
+    pca_n_components = 30L,
     metric = "cosine",
     n_neighbors = 10L,
     min_dist = 0.05,
@@ -168,9 +210,14 @@ spatial_clustering_workflow <- function(
     verbose = TRUE
 ) {
   clustering_method <- match.arg(clustering_method)
+  umap_input_method <- match.arg(umap_input_method)
 
   if (clustering_method == "dbscan" && is.null(eps)) {
     stop("'eps' must be provided when clustering_method = 'dbscan'.")
+  }
+
+  if (umap_input_method == "l2_pca" && metric != "euclidean") {
+    stop("When 'umap_input_method = \"l2_pca\"', 'metric' must be 'euclidean'.")
   }
 
   extracted <- extract_spectra_matrix(msi_obj)
@@ -178,11 +225,41 @@ spatial_clustering_workflow <- function(
   spectra <- extracted$spectra
   pixel_info <- extracted$pixel_info
 
+  spectra <- as.matrix(spectra)
+  storage.mode(spectra) <- "numeric"
+  check_spectra_matrix(spectra)
+
   spectra <- remove_constant_features(spectra)
-  spectra_scaled <- apply_feature_scaling(spectra, method = "minmax")
+  spectra <- as.matrix(spectra)
+  storage.mode(spectra) <- "numeric"
+  check_spectra_matrix(spectra)
+
+  spectra_scaled <- NULL
+  spectra_l2 <- NULL
+  pca_result <- NULL
+  umap_input <- NULL
+
+  if (umap_input_method == "scaled") {
+    spectra_scaled <- apply_feature_scaling(spectra, method = "minmax")
+    spectra_scaled <- as.matrix(spectra_scaled)
+    storage.mode(spectra_scaled) <- "numeric"
+    umap_input <- spectra_scaled
+  }
+
+  if (umap_input_method == "l2_pca") {
+    spectra_l2 <- .l2_normalize_rows(spectra)
+    pca_result <- .run_pca_irlba(
+      x = spectra_l2,
+      n_components = pca_n_components,
+      center = TRUE,
+      scale. = FALSE
+    )
+    umap_input <- as.matrix(pca_result$scores)
+    storage.mode(umap_input) <- "numeric"
+  }
 
   umap_df <- run_umap_py(
-    x = spectra_scaled,
+    x = umap_input,
     python_path = python_path,
     metric = metric,
     n_neighbors = n_neighbors,
@@ -218,6 +295,9 @@ spatial_clustering_workflow <- function(
   list(
     spectra_filtered = spectra,
     spectra_scaled = spectra_scaled,
+    spectra_l2 = spectra_l2,
+    pca_result = pca_result,
+    umap_input = umap_input,
     umap_df = umap_df,
     clustering_result = clustering_res,
     cluster_df = cluster_df,

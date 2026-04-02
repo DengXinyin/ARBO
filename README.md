@@ -36,23 +36,27 @@ The package depends on:
 Other imported packages are installed automatically with ARBO.
 
 If Cardinal is not already installed, you may install it with:
-
+```r
 if (!require("BiocManager", quietly = TRUE))
     install.packages("BiocManager")
 
 BiocManager::install("Cardinal")
-Alternatively, the development version can be installed from GitHub:
+```
 
+Alternatively, the development version can be installed from GitHub:
+```r
 if (!require("remotes", quietly = TRUE))
     install.packages("remotes")
 
 remotes::install_github("kuwisdelu/Cardinal", ref = remotes::github_release())
+```
+
 Optional clustering backends used by some methods may require additional
 packages such as:
+- `mclust`
+- `e1071`
+- `dbscan`
 
-mclust
-e1071
-dbscan
 Python dependencies
 Some functions in ARBO require a Python environment configured for
 reticulate, especially for UMAP embedding.

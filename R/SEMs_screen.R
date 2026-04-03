@@ -106,7 +106,7 @@ SEMs_screen <- function(
     stop("Column '", group_col, "' was not found in pixelData(msi_obj).")
   }
 
-  group_vec <- pixel_df[[group_col]]
+  group_vec <- as.factor(pixel_df[[group_col]])
 
   if (all(is.na(group_vec))) {
     stop("Grouping column '", group_col, "' contains only NA values.")
@@ -136,13 +136,21 @@ SEMs_screen <- function(
     BPPARAM = Cardinal::getCardinalBPPARAM()
   )
 
-  coloc_names <- names(coloc_res)
-
-  colocalized_df <- dplyr::bind_rows(lapply(coloc_names, function(nm) {
-    df <- as.data.frame(coloc_res[[nm]])
-    df$tissue <- nm
-    df
-  }))
+  # 如果返回的是按组命名的 list，则按原始代码处理
+  if (is.list(coloc_res) && !inherits(coloc_res, "DataFrame") && !inherits(coloc_res, "data.frame")) {
+    colocalized_df <- dplyr::bind_rows(lapply(names(coloc_res), function(nm) {
+      df <- as.data.frame(coloc_res[[nm]])
+      df$tissue <- nm
+      df
+    }))
+  } else {
+    # 如果不是 list，说明 Cardinal 没按分组拆开，给出明确报错
+    stop(
+      "Cardinal::colocalized() did not return a group-wise list. ",
+      "This usually means 'group_col' was not interpreted as a categorical reference. ",
+      "Please check whether pixelData(msi_obj)[[group_col]] is a factor/character grouping variable."
+    )
+  }
 
   merged_df <- dplyr::inner_join(
     ssc_df,
@@ -154,7 +162,7 @@ SEMs_screen <- function(
     stop("Merged table must contain both 'class' and 'tissue' columns.")
   }
 
-  matched_df <- merged_df[merged_df$class == merged_df$tissue, , drop = FALSE]
+  matched_df <- merged_df[as.character(merged_df$class) == as.character(merged_df$tissue), , drop = FALSE]
 
   results_df <- matched_df %>%
     dplyr::mutate(
